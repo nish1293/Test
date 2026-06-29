@@ -41,8 +41,11 @@ pip install -r requirements.txt
 # Recommended first run — one ward from OpenStreetMap (open & reproducible):
 python pipeline.py --place "Shanthala Nagar, Bengaluru" --out out/
 
-# Interactive dashboard (hover to highlight, click for details, live stats):
+# Interactive map dashboard (hover to highlight, click for details, live stats):
 python dashboard.py --geojson out/roads_footpath.geojson   # -> out/dashboard.html
+
+# Statistics dashboard (KPIs + charts: coverage by source, gaps, by ward):
+python stats_dashboard.py --input out/roads_footpath.csv --ward-col ward  # -> out/stats.html
 
 # ...or the minimal click-only map:
 python make_map.py --geojson out/roads_footpath.geojson    # -> out/index.html
@@ -125,7 +128,8 @@ python pipeline.py --roads-file bbmp_roads.shp --place "Bengaluru" --out out/
 | `core.py` | Pure geometry logic: length, footpath 0/1, layered (OSM+detection) presence, summary. **No network.** |
 | `pipeline.py` | Download (OSM/osmnx or local files) + Phase 2 detection merge + CLI. |
 | `tile2net_adapter.py` | Phase 2: run Tile2Net / load its output into a footways layer. |
-| `dashboard.py` | Interactive dashboard: hover-highlight, click-for-details side panel, live coverage stats, present/absent filter. Self-contained (Leaflet vendored in `assets/`). |
+| `dashboard.py` | Interactive map dashboard: hover-highlight, click-for-details side panel, live coverage stats, present/absent filter. Self-contained (Leaflet vendored in `assets/`). |
+| `stats_dashboard.py` | Statistics dashboard: KPIs + charts (coverage by evidence source, present/absent, length histogram, coverage by ward, longest streets with no footpath). Pure HTML, no chart-library deps. |
 | `make_map.py` | Minimal click-only Leaflet `index.html`. |
 | `validate.py` | Phase 3: sample segments to label + score predictions (precision/recall/F1/kappa). |
 | `selftest.py` | Offline correctness test of core + adapter + validation. |

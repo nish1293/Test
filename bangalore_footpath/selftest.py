@@ -98,6 +98,7 @@ def main() -> None:
 
     test_phase2_detection()
     test_phase3_validation()
+    test_stats_dashboard()
     print("\nALL SELF-TESTS PASSED")
 
 
@@ -199,6 +200,39 @@ def test_phase3_validation() -> None:
     assert list(samp.road_id) == list(samp2.road_id), "seed must be deterministic"
     assert samp["footpath_present"].nunique() == 2, "stratify should cover 0 and 1"
     print(f"[ok] Phase 3 sampling: deterministic, stratified ({len(samp)} rows)")
+
+
+def test_stats_dashboard() -> None:
+    """Stats dashboard: KPIs, by-source, gaps, by-ward, and HTML render."""
+    import pandas as pd
+
+    from stats_dashboard import compute_stats, render
+
+    df = pd.DataFrame({
+        "road_id": ["R1", "R2", "R3", "R4"],
+        "name": ["A", "B", "C", "D"],
+        "length_m": [1000, 500, 2000, 500],   # 4.0 km total
+        "footpath_present": [1, 1, 0, 0],
+        "footpath_source": ["tag", "proximity", "none", "none"],
+        "ward": ["W1", "W1", "W2", "W2"],
+    })
+    s = compute_stats(df, ward_col="ward")
+
+    assert s["n_streets"] == 4
+    assert s["total_km"] == 4.0 and s["footpath_km"] == 1.5
+    assert s["gap_km"] == 2.5
+    assert s["coverage_pct"] == 37.5            # 1.5 / 4.0
+    assert s["present_count"] == 2 and s["absent_count"] == 2
+    # longest gap first (R3 = 2000 m)
+    assert s["top_gaps"][0]["name"] == "C" and s["top_gaps"][0]["length_m"] == 2000
+    # ward sorted lowest coverage first: W2 (0%) before W1 (100%)
+    assert [w["ward"] for w in s["by_ward"]] == ["W2", "W1"]
+    assert s["by_ward"][0]["coverage_pct"] == 0.0
+
+    html = render(s)
+    assert "37.5%" in html and "Longest streets with no footpath" in html
+    print(f"[ok] stats: {s['coverage_pct']}% coverage, "
+          f"top gap {s['top_gaps'][0]['length_m']} m, wards {len(s['by_ward'])}")
 
 
 if __name__ == "__main__":
