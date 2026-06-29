@@ -73,6 +73,35 @@ high-res XYZ basemap you're licensed to use. `tile2net_adapter.run_tile2net()`
 wraps the run; `normalize_detections()` / `load_tile2net_dir()` convert its
 output into the footways layer the pipeline consumes (both are offline-tested).
 
+### Phase 3 — validate the footpath layer
+
+Numbers are only credible once you've measured them against ground truth.
+Phase 3 draws a random (optionally stratified) sample to label by foot or
+Street View, then scores predictions.
+
+```bash
+# 1. Draw 60 segments, evenly split predicted-present / predicted-absent:
+python validate.py sample --geojson out/roads_footpath.geojson \
+    --n 60 --stratify --seed 42 --out validation_sample.csv
+
+# 2. Fill the 'truth' column (0/1) in validation_sample.csv on the ground.
+
+# 3. Score it:
+python validate.py evaluate --predictions out/roads_footpath.csv \
+    --truth validation_sample.csv
+```
+
+Reports a confusion matrix plus **precision, recall, specificity, accuracy,
+F1, and Cohen's kappa**, computed two ways:
+
+* **count-weighted** — per segment;
+* **length-weighted** — per metre (the policy-relevant view: a wrong call on a
+  2 km arterial matters more than on a 30 m lane).
+
+Stratified sampling matters: labelling only predicted-present roads measures
+*precision* but tells you nothing about *recall* (footpaths the tool missed) —
+`--stratify` covers both classes.
+
 ### Using BBMP centerlines instead of OSM roads
 
 The user-facing BBMP roads centerline layer lives on the OpenCity portal:
@@ -92,7 +121,8 @@ python pipeline.py --roads-file bbmp_roads.shp --place "Bengaluru" --out out/
 | `pipeline.py` | Download (OSM/osmnx or local files) + Phase 2 detection merge + CLI. |
 | `tile2net_adapter.py` | Phase 2: run Tile2Net / load its output into a footways layer. |
 | `make_map.py` | Renders the GeoJSON into a standalone Leaflet `index.html`. |
-| `selftest.py` | Offline correctness test of core + adapter (synthetic geometry). |
+| `validate.py` | Phase 3: sample segments to label + score predictions (precision/recall/F1/kappa). |
+| `selftest.py` | Offline correctness test of core + adapter + validation. |
 
 ```bash
 python selftest.py   # verifies length + 0/1 logic with no network
@@ -111,6 +141,7 @@ files via `--roads-file` / `--footways-file`.
 - **Phase 1:** road length + OSM-derived footpath 0/1 + map ✅
 - **Phase 2 (this update):** Tile2Net detection fills streets OSM hasn't
   tagged; added coverage is attributed `tile2net` in `footpath_source` ✅
-- **Phase 3:** ground-truth validation of a random sample; accuracy metrics.
+- **Phase 3 (this update):** ground-truth validation harness — stratified
+  sampling + precision/recall/F1/kappa, count- and length-weighted ✅
 - **Phase 4:** richer quality score (continuity, width, obstructions, lighting).
 - **Phase 5:** citizen corrections fed back to OpenStreetMap.

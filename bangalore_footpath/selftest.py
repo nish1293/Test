@@ -97,6 +97,7 @@ def main() -> None:
     )
 
     test_phase2_detection()
+    test_phase3_validation()
     print("\nALL SELF-TESTS PASSED")
 
 
@@ -144,6 +145,60 @@ def test_phase2_detection() -> None:
     merged = merge_footways(footways, detected)
     assert len(merged) == len(footways) + len(detected)
     print(f"[ok] Phase 2: detection filled R3, coverage 83.2% -> {cov}%")
+
+
+def test_phase3_validation() -> None:
+    """Phase 3: confusion matrix, metrics, evaluate join, and sampling."""
+    import pandas as pd
+
+    from validate import (
+        confusion,
+        evaluate,
+        metrics_from_confusion,
+        sample_segments,
+    )
+
+    # Hand-built case: 2 TP, 1 FP, 1 FN, 1 TN.
+    pred = pd.Series([1, 1, 1, 0, 0])
+    truth = pd.Series([1, 1, 0, 1, 0])
+    c = confusion(pred, truth)
+    assert (c["tp"], c["fp"], c["fn"], c["tn"]) == (2, 1, 1, 1), c
+    m = metrics_from_confusion(c)
+    assert m["precision"] == round(2 / 3, 4), m
+    assert m["recall"] == round(2 / 3, 4), m
+    assert m["accuracy"] == 0.6, m
+    print(f"[ok] Phase 3 metrics: P={m['precision']} R={m['recall']} "
+          f"acc={m['accuracy']} kappa={m['kappa']}")
+
+    # Length-weighted differs from count-weighted: weight the FP heavily.
+    weight = pd.Series([10, 10, 1000, 10, 10])
+    cw = confusion(pred, truth, weight)
+    assert cw["fp"] == 1000, cw
+    mw = metrics_from_confusion(cw)
+    assert mw["precision"] < m["precision"], "big FP should hurt length precision"
+
+    # evaluate(): join predictions to a partially-labelled truth file.
+    preds = pd.DataFrame({
+        "road_id": ["R1", "R2", "R3", "R4", "R5"],
+        "footpath_present": [1, 1, 1, 0, 0],
+        "length_m": [10, 10, 1000, 10, 10],
+    })
+    truth_df = pd.DataFrame({
+        "road_id": ["R1", "R2", "R3", "R4", "R5"],
+        "truth": [1, 1, 0, 1, ""],  # R5 left unlabelled
+    })
+    rep = evaluate(preds, truth_df)
+    assert rep["n_unlabelled"] == 1 and rep["n_scored"] == 4, rep
+    assert "length" in rep and rep["count"]["n"] == 4
+    print(f"[ok] Phase 3 evaluate: scored {rep['n_scored']}, "
+          f"{rep['n_unlabelled']} unlabelled, count-acc={rep['count']['accuracy']}")
+
+    # Sampling is deterministic and stratified across both predicted classes.
+    samp = sample_segments(preds, n=4, stratify=True, seed=7)
+    samp2 = sample_segments(preds, n=4, stratify=True, seed=7)
+    assert list(samp.road_id) == list(samp2.road_id), "seed must be deterministic"
+    assert samp["footpath_present"].nunique() == 2, "stratify should cover 0 and 1"
+    print(f"[ok] Phase 3 sampling: deterministic, stratified ({len(samp)} rows)")
 
 
 if __name__ == "__main__":
