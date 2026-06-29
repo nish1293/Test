@@ -120,6 +120,62 @@ def assign_footpath_presence(
     return roads
 
 
+def merge_footways(*gdfs: Optional[gpd.GeoDataFrame], crs: str = WGS84) -> gpd.GeoDataFrame:
+    """Concatenate footway layers (OSM, detected, local) into one GeoDataFrame.
+
+    Empty/None layers are skipped; all are aligned to ``crs``. Keeps only the
+    geometry plus a ``footway_source`` column if present.
+    """
+    frames = []
+    for g in gdfs:
+        if g is None or len(g) == 0:
+            continue
+        g = g.copy()
+        if g.crs is None:
+            g = g.set_crs(WGS84)
+        g = g.to_crs(crs)
+        keep = ["geometry"] + (["footway_source"] if "footway_source" in g.columns else [])
+        frames.append(g[keep])
+    if not frames:
+        return gpd.GeoDataFrame(geometry=[], crs=crs)
+    return gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs=crs)
+
+
+def assign_footpath_presence_multi(
+    roads: gpd.GeoDataFrame,
+    osm_footways: Optional[gpd.GeoDataFrame] = None,
+    detected_footways: Optional[gpd.GeoDataFrame] = None,
+    buffer_m: float = 12.0,
+    sidewalk_col: str = "sidewalk",
+    detected_source: str = "tile2net",
+    crs: str = METRIC_CRS,
+) -> gpd.GeoDataFrame:
+    """Layered presence: OSM (tag + proximity) first, then fill gaps with detection.
+
+    A road that OSM already covers keeps its OSM ``footpath_source``
+    (tag / proximity / both). A road OSM left ``none`` but that a *detected*
+    footway (e.g. Tile2Net output) runs near is upgraded to present with
+    ``footpath_source = detected_source``. This makes the Phase 2 contribution
+    explicit and measurable (how many km detection added on top of OSM).
+    """
+    base = assign_footpath_presence(roads, osm_footways, buffer_m, sidewalk_col, crs)
+    if detected_footways is None or len(detected_footways) == 0:
+        return base
+
+    # Proximity-only pass against detections (ignore any sidewalk tag by
+    # pointing at a column that doesn't exist).
+    det = assign_footpath_presence(
+        base, detected_footways, buffer_m, sidewalk_col="__no_tag__", crs=crs
+    )
+    base_present = base["footpath_present"].astype(bool).to_numpy()
+    det_present = det["footpath_present"].astype(bool).to_numpy()
+    filled = det_present & ~base_present
+
+    base.loc[filled, "footpath_present"] = 1
+    base.loc[filled, "footpath_source"] = detected_source
+    return base
+
+
 def summarize(
     roads: gpd.GeoDataFrame,
     length_col: str = "length_m",

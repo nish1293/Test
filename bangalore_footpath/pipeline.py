@@ -39,10 +39,11 @@ import geopandas as gpd
 
 from core import (
     WGS84,
-    assign_footpath_presence,
+    assign_footpath_presence_multi,
     compute_lengths,
     summarize,
 )
+from tile2net_adapter import detected_footways
 
 
 def _lazy_osmnx():
@@ -110,6 +111,12 @@ def main() -> None:
                     help="Bounding box: south west north east (lat lon)")
     ap.add_argument("--roads-file", help="Local roads shapefile/GeoJSON (e.g. BBMP centerlines)")
     ap.add_argument("--footways-file", help="Local footways shapefile/GeoJSON")
+    ap.add_argument("--tile2net-dir",
+                    help="Phase 2: Tile2Net project output dir (detected sidewalks fill OSM gaps)")
+    ap.add_argument("--detections-file",
+                    help="Phase 2: a detected-footpath GeoJSON/shapefile (alternative to --tile2net-dir)")
+    ap.add_argument("--detection-class-col",
+                    help="Column in the detections file holding the class label (e.g. f_type)")
     ap.add_argument("--ward-col", help="Column in roads to group the summary by (e.g. ward name)")
     ap.add_argument("--buffer", type=float, default=12.0,
                     help="Footway proximity buffer in metres (default 12)")
@@ -139,9 +146,20 @@ def main() -> None:
         footways = download_footways_osm(polygon)
     print(f"  {len(footways)} footway features")
 
+    # --- Phase 2: detected footpaths (Tile2Net) to fill OSM gaps -------------
+    detected = detected_footways(
+        tile2net_dir=args.tile2net_dir,
+        detections_file=args.detections_file,
+        class_col=args.detection_class_col,
+    )
+    if detected is not None:
+        print(f"  {len(detected)} detected footpath features (Phase 2)")
+
     # --- Compute -------------------------------------------------------------
     roads = compute_lengths(roads)
-    roads = assign_footpath_presence(roads, footways, buffer_m=args.buffer)
+    roads = assign_footpath_presence_multi(
+        roads, footways, detected, buffer_m=args.buffer
+    )
 
     # --- Export --------------------------------------------------------------
     gj = os.path.join(args.out, "roads_footpath.geojson")

@@ -16,10 +16,13 @@ from shapely.geometry import LineString
 
 from core import (
     assign_footpath_presence,
+    assign_footpath_presence_multi,
     compute_lengths,
+    merge_footways,
     summarize,
     WGS84,
 )
+from tile2net_adapter import normalize_detections
 
 # A handy spot in central Bengaluru (~MG Road area) to build realistic
 # lat/lon geometry. 0.001 deg longitude ~= 101 m at this latitude; we don't
@@ -93,7 +96,54 @@ def main() -> None:
         f"{row['total_km']} km total, {row['coverage_pct']}% with footpath"
     )
 
+    test_phase2_detection()
     print("\nALL SELF-TESTS PASSED")
+
+
+def test_phase2_detection() -> None:
+    """Phase 2: a detected footpath fills R3 (the OSM-absent street).
+
+    Also exercises normalize_detections() on a polygon (Tile2Net emits sidewalk
+    polygons, not just lines) and confirms OSM-covered roads keep their source.
+    """
+    roads, footways = build_synthetic()
+    roads = compute_lengths(roads)
+
+    # A detected sidewalk POLYGON straddling R3 (which OSM marks sidewalk=no).
+    dx = 0.00006  # ~6 m
+    r3 = roads.set_index("road_id").loc["R3", "geometry"]
+    # build a thin polygon around R3 in lat/lon by buffering in WGS84 degrees
+    detected_raw = gpd.GeoDataFrame(
+        {"f_type": ["sidewalk"]},
+        geometry=[
+            _line(
+                (LON + 0.05 + dx, LAT),
+                (LON + 0.05 + dx, LAT + 0.0030),
+            ).buffer(0.00002)
+        ],
+        crs=WGS84,
+    )
+    detected = normalize_detections(detected_raw, class_col="f_type")
+    assert detected.iloc[0].footway_source == "tile2net"
+    assert "Polygon" in detected.geometry.type.iloc[0]
+
+    out = assign_footpath_presence_multi(roads, footways, detected, buffer_m=12.0)
+    by_id = out.set_index("road_id")
+    # OSM-covered roads keep their original source...
+    assert by_id.loc["R1", "footpath_source"] == "tag"
+    assert by_id.loc["R2", "footpath_source"] == "proximity"
+    # ...and R3, previously absent, is now filled by detection.
+    assert by_id.loc["R3", "footpath_present"] == 1, "detection should fill R3"
+    assert by_id.loc["R3", "footpath_source"] == "tile2net"
+
+    # Coverage rises to 100% once the gap is filled.
+    cov = summarize(out).iloc[0]["coverage_pct"]
+    assert cov == 100.0, cov
+
+    # merge_footways sanity: OSM + detected combine into one layer.
+    merged = merge_footways(footways, detected)
+    assert len(merged) == len(footways) + len(detected)
+    print(f"[ok] Phase 2: detection filled R3, coverage 83.2% -> {cov}%")
 
 
 if __name__ == "__main__":

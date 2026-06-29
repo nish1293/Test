@@ -49,6 +49,30 @@ python pipeline.py --bbox 12.96 77.59 12.99 77.62 --out out/
 python pipeline.py --place "Bengaluru" --ward-col ward --out out/
 ```
 
+### Phase 2 — fill OSM gaps with Tile2Net detection
+
+OSM only covers streets someone has tagged. [Tile2Net](https://github.com/VIDA-NYU/tile2net)
+detects sidewalks from aerial imagery; feeding that in upgrades streets OSM
+left as *absent* to *present*, attributed as `footpath_source = tile2net`, so
+you can see exactly how much coverage detection added.
+
+```bash
+# If you already ran Tile2Net and have its project output dir:
+python pipeline.py --place "Shanthala Nagar, Bengaluru" \
+    --tile2net-dir tile2net_out/ --out out/
+
+# Or any detected-footpath file (GeoJSON/shapefile), optionally with a class column:
+python pipeline.py --place "Shanthala Nagar, Bengaluru" \
+    --detections-file detections.geojson --detection-class-col f_type --out out/
+```
+
+Running Tile2Net itself needs `pip install tile2net`, torch (GPU for any
+volume), and an **aerial-imagery source for Bangalore** — Tile2Net ships only
+US city sources, so supply local orthoimagery GeoTIFFs or register a custom
+high-res XYZ basemap you're licensed to use. `tile2net_adapter.run_tile2net()`
+wraps the run; `normalize_detections()` / `load_tile2net_dir()` convert its
+output into the footways layer the pipeline consumes (both are offline-tested).
+
 ### Using BBMP centerlines instead of OSM roads
 
 The user-facing BBMP roads centerline layer lives on the OpenCity portal:
@@ -64,10 +88,11 @@ python pipeline.py --roads-file bbmp_roads.shp --place "Bengaluru" --out out/
 
 | File | Role |
 |---|---|
-| `core.py` | Pure geometry logic: length, footpath 0/1, summary. **No network.** |
-| `pipeline.py` | Download (OSM/osmnx or local files) + orchestration + CLI. |
+| `core.py` | Pure geometry logic: length, footpath 0/1, layered (OSM+detection) presence, summary. **No network.** |
+| `pipeline.py` | Download (OSM/osmnx or local files) + Phase 2 detection merge + CLI. |
+| `tile2net_adapter.py` | Phase 2: run Tile2Net / load its output into a footways layer. |
 | `make_map.py` | Renders the GeoJSON into a standalone Leaflet `index.html`. |
-| `selftest.py` | Offline correctness test of `core.py` (synthetic geometry). |
+| `selftest.py` | Offline correctness test of core + adapter (synthetic geometry). |
 
 ```bash
 python selftest.py   # verifies length + 0/1 logic with no network
@@ -83,9 +108,9 @@ files via `--roads-file` / `--footways-file`.
 
 ## Roadmap (where this fits)
 
-- **Phase 1 (this tool):** road length + OSM-derived footpath 0/1 + map ✅
-- **Phase 2:** automated footpath detection for gaps (e.g. Tile2Net on aerial
-  imagery) to fill streets OSM hasn't tagged.
+- **Phase 1:** road length + OSM-derived footpath 0/1 + map ✅
+- **Phase 2 (this update):** Tile2Net detection fills streets OSM hasn't
+  tagged; added coverage is attributed `tile2net` in `footpath_source` ✅
 - **Phase 3:** ground-truth validation of a random sample; accuracy metrics.
 - **Phase 4:** richer quality score (continuity, width, obstructions, lighting).
 - **Phase 5:** citizen corrections fed back to OpenStreetMap.
