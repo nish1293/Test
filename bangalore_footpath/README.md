@@ -1,0 +1,91 @@
+# Bangalore Road & Footpath Tool — Phase 1
+
+Measure the **length of every road** and flag **footpath present / absent (0/1)**
+across Bangalore streets, then view it on a web map.
+
+This is **Phase 1** of the roadmap: a road base layer with per-segment length
+plus a first-pass binary footpath layer derived from OpenStreetMap. Later
+phases add automated detection (Tile2Net), validation, and crowdsourcing.
+
+## What it produces
+
+For a chosen area (a ward, a bounding box, or the whole city):
+
+| Output | Description |
+|---|---|
+| `out/roads_footpath.geojson` | Road segments with `length_m`, `footpath_present` (0/1), `footpath_source` |
+| `out/roads_footpath.csv` | Same attributes as a flat table (no geometry) |
+| `out/summary.csv` | Total km, footpath-km, and **% coverage by length** (optionally per ward) |
+| `out/index.html` | Standalone Leaflet map — green = footpath, red = none, click for details |
+
+## How it works
+
+1. **Road length** — road centerlines are reprojected to **EPSG:32643**
+   (UTM 43N, metres) and `geometry.length` is taken per segment. This is the
+   reliable way to measure length; raw lat/lon degrees are not metric.
+2. **Footpath presence (0/1)** — a segment is `1` if **either**:
+   - it carries a positive OSM `sidewalk` tag (`both/left/right/yes`), **or**
+   - a separately-mapped footway runs within ~12 m of it (sidewalks are very
+     often mapped as their own lines in OSM).
+   `footpath_source` records which signal fired (`tag` / `proximity` / `both` / `none`).
+
+## Install
+
+```bash
+pip install -r requirements.txt
+```
+
+## Run
+
+```bash
+# Recommended first run — one ward from OpenStreetMap (open & reproducible):
+python pipeline.py --place "Shanthala Nagar, Bengaluru" --out out/
+python make_map.py --geojson out/roads_footpath.geojson
+
+# A bounding box instead (south west north east, in lat/lon):
+python pipeline.py --bbox 12.96 77.59 12.99 77.62 --out out/
+
+# Whole city, grouped by an attribute column for per-area coverage:
+python pipeline.py --place "Bengaluru" --ward-col ward --out out/
+```
+
+### Using BBMP centerlines instead of OSM roads
+
+The user-facing BBMP roads centerline layer lives on the OpenCity portal:
+<https://data.opencity.in/dataset/bbmp-roads-centerline-map>. Download the
+shapefile/GeoJSON and point the pipeline at it (footpaths still come from OSM
+unless you also pass `--footways-file`):
+
+```bash
+python pipeline.py --roads-file bbmp_roads.shp --place "Bengaluru" --out out/
+```
+
+## Files
+
+| File | Role |
+|---|---|
+| `core.py` | Pure geometry logic: length, footpath 0/1, summary. **No network.** |
+| `pipeline.py` | Download (OSM/osmnx or local files) + orchestration + CLI. |
+| `make_map.py` | Renders the GeoJSON into a standalone Leaflet `index.html`. |
+| `selftest.py` | Offline correctness test of `core.py` (synthetic geometry). |
+
+```bash
+python selftest.py   # verifies length + 0/1 logic with no network
+```
+
+## Network note
+
+`core.py` and `selftest.py` need **no network**. `pipeline.py` downloads from
+the OSM Overpass API (via osmnx) and, optionally, BBMP data from OpenCity.
+Some managed/CI/sandbox environments block these hosts by egress policy — run
+the download where they are reachable (e.g. a local machine), or supply local
+files via `--roads-file` / `--footways-file`.
+
+## Roadmap (where this fits)
+
+- **Phase 1 (this tool):** road length + OSM-derived footpath 0/1 + map ✅
+- **Phase 2:** automated footpath detection for gaps (e.g. Tile2Net on aerial
+  imagery) to fill streets OSM hasn't tagged.
+- **Phase 3:** ground-truth validation of a random sample; accuracy metrics.
+- **Phase 4:** richer quality score (continuity, width, obstructions, lighting).
+- **Phase 5:** citizen corrections fed back to OpenStreetMap.
